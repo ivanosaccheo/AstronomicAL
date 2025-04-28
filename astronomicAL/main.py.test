@@ -1,0 +1,9 @@
+import panel as pn
+
+pn.extension()
+
+# Simple app that should appear in your browser
+def app():
+    return pn.pane.Markdown("### Hello from minimal app!")
+
+pn.panel(app).servable()
