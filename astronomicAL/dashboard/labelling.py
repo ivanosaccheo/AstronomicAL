@@ -548,7 +548,7 @@ class LabellingDashboard(param.Parameterized):
         if (index == 0) or (total == 0):
             self.first_labelled_button.disabled = True
             self.prev_labelled_button.disabled = True
-
+            
         if index >= (total - 1):
             self.next_labelled_button.disabled = True
 

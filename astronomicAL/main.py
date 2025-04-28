@@ -1,6 +1,5 @@
 import os
 import sys
-
 sys.path.insert(1, os.path.join(sys.path[0], "../"))
 from astronomicAL.utils import load_config
 import astronomicAL.config as config
@@ -10,6 +9,7 @@ import panel as pn
 import pandas as pd
 import time
 
+print(">>> main.py loaded")
 hv.extension("bokeh")
 hv.renderer("bokeh").webgl = True
 
