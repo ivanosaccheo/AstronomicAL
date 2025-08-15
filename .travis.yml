@@ -1,0 +1,11 @@
+language: python
+python:
+  - "3.8"
+install:
+  - pip install -r requirements.txt
+  - pip install pytest-cov
+script:
+  - pytest --cov=. --cov-config=.coveragerc
+after_success:
+  - coverage xml
+  - bash <(curl -s https://codecov.io/bash) -f coverage.xml
