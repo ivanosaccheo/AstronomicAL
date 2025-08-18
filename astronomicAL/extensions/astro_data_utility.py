@@ -476,8 +476,8 @@ class BaseSpectraClass:
             plot_abslines = False
             plot_emlines = False
 
-        flux_curve = hv.Curve((wavlen, flux)).opts(color='grey', line_width=0.3)
-        smoothed_curve = hv.Curve((wavlen, smoothed)).opts(**smoothed_kwargs)
+        flux_curve = hv.Curve((wavlen, flux), label = "Flux").opts(color='grey', line_width=0.3)
+        smoothed_curve = hv.Curve((wavlen, smoothed), label = "Smoothed Flux").opts(**smoothed_kwargs)
 
         if plot_mask:
             start_idx, end_idx = self.find_masked_regions(mask = self.spectra[idx].mask, min_width=5)
@@ -489,10 +489,10 @@ class BaseSpectraClass:
         
         if plot_model:
             model = self.spectra[idx].model
-            model_curve = hv.Curve((wavlen, model)).opts(**model_kwargs)
+            model_curve = hv.Curve((wavlen, model), label = "Model").opts(**model_kwargs)
             overlays.append(model_curve)
         
-        ymin, ymax = np.min(smoothed), np.max(smoothed)
+        ymin, ymax = np.nanmin(smoothed), np.nanmax(smoothed)
         ymin = ymin / 3 if ymin >= 0 else ymin * 1.5
         ymax = ymax * 1.5 if ymax >= 0 else ymax / 3 ##Sometimes Euclid Fluxes are negative
         xmin, xmax =  xmin, xmax = np.min(wavlen), np.max(wavlen)
@@ -534,7 +534,8 @@ class BaseSpectraClass:
                     xlim=(xmin, xmax * 1.02),
                     ylim=(ymin, ymax),
                     active_tools=[],
-                    show_legend=False,
+                    show_legend=True,
+                    legend_position = 'bottom_left',
                     **kwargs,
                     )
                 )
@@ -721,7 +722,7 @@ class EuclidSpectraClass(BaseSpectraClass):
 
     def query_table(self, verbose = False):
         query = f"""SELECT TOP 400
-                        spec.file_name, spec.file_path, spec.source_id, spec.spectra_source_oid, spec.ra_obj, spec.dec_obj,
+                    spec.file_name, spec.file_path, spec.source_id, spec.spectra_source_oid, spec.ra_obj, spec.dec_obj,
                     DISTANCE(spec.ra_obj, spec.dec_obj, {self.ra}, {self.dec})*3600 AS separation
                     FROM spectra_source AS spec
                     WHERE DISTANCE(ra_obj, dec_obj, {self.ra}, {self.dec}) < {self.max_separation}
@@ -820,6 +821,49 @@ class EuclidSpectraClass(BaseSpectraClass):
         toc = time.perf_counter()
         if verbose:
             print(f"Retrieving Euclid spectra required {toc-tic} seconds")
+
+    
+    def query_specz_table(self, verbose = False):
+        """It queries the table with fitted specz and classification. If classification == "star", redshift is set to 0,
+         else the one derived from galaxies with the highest probability is used. QSO redshift not available at the moment"""
+
+        if self.spectra is not None:
+            sourceid_list = [spectrum.sourceId for spectrum in self.spectra]
+            query = f"""SELECT 
+                    class.object_id, class.spe_class, gal.spe_z AS gal_z, gal.spe_z_prob
+                    FROM catalogue.spectro_zcatalog_spe_classification as class
+                    LEFT JOIN catalogue.spectro_zcatalog_spe_galaxy_candidates AS gal 
+                    ON class.object_id = gal.object_id
+                    WHERE class.object_id IN {tuple(sourceid_list)}
+                    """
+           
+            tic = time.perf_counter()
+            job = self.client.launch_job(query)
+            try:
+                self.specz_results = job.get_results()
+                #keeping only galaxy redshift with highest probability, reordering to match the sourceid_list
+                self.specz_table = (self.specz_results.to_pandas().sort_values(["object_id", "spe_z_prob"], 
+                                                                   ascending=[True, False]).drop_duplicates("object_id"))
+                self.specz_table= self.specz_table.set_index("object_id").reindex(sourceid_list).reset_index()
+                
+                self.specz_table['redshift'] = np.select(np.select([self.specz_table["spe_class"] == "galaxy",
+                                                                    self.specz_table["spe_class"] == "qso",
+                                                                    self.specz_table["spe_class"].isna()],
+                                                                   [self.specz_table["gal_z"],
+                                                                    np.nan,
+                                                                    np.nan], default=0))
+
+            except AttributeError:
+                print("Query returned None")
+                self.specz_table = pd.DataFrame()
+            
+            toc = time.perf_counter()
+            if verbose:
+                print(f"Querying Euclid spectroscopic redshift table required {toc-tic} seconds")
+    
+
+        
+        
     
     def get_spectra(self, max_separation = None, return_object = False):
         """Call all methods to get spectra
