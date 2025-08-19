@@ -16,6 +16,7 @@ import param
 import uuid
 import matplotlib.pyplot as plt
 import concurrent.futures 
+import pandas.api.types as pdt
 from bokeh.document import without_document_lock
 from bokeh.models import  NormalHead
 from bokeh.models import Range1d, LinearAxis
@@ -99,10 +100,15 @@ class CustomPlotClass(param.Parameterized):
             return pd.DataFrame(self.src.data, columns=cols, index=[0])
         return None
     
-    def get_ra_dec(self, err_message = "No ra and dec available for this source"):
+    def get_value_from_df(self, column):
         selected_source = self.get_selected_source()
-        if (selected_source is not None) and self.check_required_column("ra_dec"):
-            ra_dec = selected_source["ra_dec"][0]
+        if (selected_source is not None) and self.check_required_column(column):
+            return selected_source[column][0]
+        return None
+            
+    def get_ra_dec(self, err_message = "No ra and dec available for this source"):
+        ra_dec = self.get_value_from_df("ra_dec")
+        if ra_dec is not None:
             ra = float(ra_dec[: ra_dec.index(",")])
             dec = float(ra_dec[ra_dec.index(",") + 1 :])
         else:
@@ -113,12 +119,49 @@ class CustomPlotClass(param.Parameterized):
     def check_required_column(self, column):
         return column in list(self.df.columns)
     
+    def get_column_list(self, excluded_columns = ["id_col", "ra_dec", "label_col"],
+                              excluded_types = ["object"], allowed_types = None):
+        """Returns the list of columns used for panel.widgets.Selector according to their type
+        allowed_types : list ["float", "numeric", "int"] """
+
+        if allowed_types is None:  
+            allowed_types = []
+
+        cols = list(self.df.columns)
+        
+        for excluded_col in excluded_columns:
+            col_name = config.settings.get(excluded_col, excluded_col)
+            if col_name in cols:
+               cols.remove(col_name)
+        
+        def matches_type(dtype, type_list):
+            """Check if a dtype matches any keyword in type_list"""
+            for t in type_list:
+                if t == "float" and (pdt.is_float_dtype(dtype)):
+                    return True
+                if t == "int" and (pdt.is_integer_dtype(dtype)):
+                    return True
+                if t == "number" and (pdt.is_numeric_dtype(dtype)):
+                    return True
+                if t == "object" and (pdt.is_object_dtype(dtype)):
+                    return True
+            return False
+
+        if allowed_types:
+            cols = [col for col in cols if matches_type(self.df[col].dtype, allowed_types)]
+        
+        cols = [col for col in cols if not matches_type(self.df[col].dtype, excluded_types)]
+
+        return cols
+
+
 
     def _get_selection_widgets_grid(self, columns_to_select, options = None):
         settings_grid = pn.GridBox(ncols=3, sizing_mode = "stretch_width", scroll = True)  
         self.select_widgets = {}
         if options is None:
-            options = list(config.main_df.columns)
+            options = self.get_column_list(excluded_columns = ["ra_dec", "label_col"],
+                              excluded_types = ["object"], allowed_types = [])
         if len(columns_to_select) > 0:
             for col in columns_to_select:
                 select_widget = pn.widgets.Select(name= col, options=options, max_height=120, sizing_mode = "stretch_width")
@@ -619,6 +662,7 @@ class SpectrumPlotClass(CustomPlotClass):
         super().__init__(data, src, close_button, extra_features)
         self.figure = pn.Column(scroll = True, sizing_mode = "stretch_both")
         self.dataset = dataset
+        self._is_euclid_spec = self.dataset == "EuclidSpec" 
         self._src_callback = self._change_source_cb
         self.src.on_change("data", self._src_callback)
         self.from_sourceId = False
@@ -663,7 +707,7 @@ class SpectrumPlotClass(CustomPlotClass):
             if (self.ra is None) or (self.dec is None):
                 raise ValueError("Missing ra and dec")
 
-        if self.dataset == "EuclidSpec":
+        if self._is_euclid_spec:
             self.spectrum_object = EuclidSpectraClass(self.ra, self.dec, max_separation = self.max_separation,
                                              sourceId = self.sourceId)
         else:
@@ -691,10 +735,11 @@ class SpectrumPlotClass(CustomPlotClass):
         def callback(future_result = None):
             shared_data.publish(self.panel_id, f"{self.dataset}_running", False)
             if self.spectrum_object.spectra is not None:
-                plot_model = True if self.dataset != "EuclidSpec" else False
-                kwargs = {"aspect" : 3.8 if self.spectrum_object.available_spectra > 1 else 3.17, "responsive" : True}
-                plot = self.spectrum_object.plot_all_spectra_hv(plot_model = plot_model, **kwargs)
-                self.figure.objects = [plot]
+                if self.redshift_column_selector.value != "None":
+                    redshift_value = self.get_value_from_df(self.redshift_column_selector.value)
+                    if redshift_value is not None:
+                       self.redshift_input.value = redshift_value
+                self._update_plot()
                 self._add_coordinates_to_shared(*self.spectrum_object.get_coordinates())
                 self.message_pane.visible = False
             else:
@@ -719,21 +764,38 @@ class SpectrumPlotClass(CustomPlotClass):
         self.max_separation_input.disabled = (self.chosen_mode == "Use TargetId")
         self.link_to_cutout_checkbox.disabled = (self.chosen_mode == "Use TargetId")
 
+        self.plot_lines_checkbox = pn.widgets.Checkbox(name = "Plot Emission/Absorption Lines positions",  value = not self._is_euclid_spec, align = "center")
+        self.plot_lines_checkbox.disabled = self._is_euclid_spec
         
-        self.redshift_input = pn.widgets.FloatInput(name = "First Source Redshift", start = 0.0, end = 15, 
+        self.redshift_input = pn.widgets.FloatInput(name = "Assign Redshift (Same for all Sources)", start = 0.0, end = 15, 
                                                     max_width = 200, max_height = 40, sizing_mode="stretch_both")
-        self.query_redshift_checkbox  = pn.widgets.Checkbox(name = "Get redshift from query",  value = False, align = "center")
-        self.redshift_input.disabled = True
-        self.query_redshift_checkbox.disabled = True
+        self.query_redshift_button  = pn.widgets.Button(name = "Query Redshift", align = "center", button_type = "primary",
+                                                       max_width = 200, max_height = 40, sizing_mode="stretch_both")
+        self.redshift_column_selector  = pn.widgets.Select(name = "Redshift Column", align = "center", 
+                                                           options = ["None"] + self.get_column_list(allowed_types=["float"]),
+                                                           value = "None",
+                                                         max_width = 200, max_height = 40, sizing_mode="stretch_both")
+        self.redshift_input.disabled = not self._is_euclid_spec
+        self.query_redshift_button.disabled = not self._is_euclid_spec
+        self.redshift_column_selector.disabled = not self._is_euclid_spec
 
       
         self.retrieve_mode_button.param.watch(self._retrieve_mode_cb, "value")
         self.max_separation_input.param.watch(self._max_separation_input_cb, "value")
         self.link_to_cutout_checkbox.param.watch(self._link_to_cutout_cb, "value")
 
+        
+        self.plot_lines_checkbox.param.watch(self._plot_lines_cb, "value") 
+        self.query_redshift_button.on_click(self._query_redshift_cb)
+        self.redshift_input.param.watch(self._redshift_input_cb, "value")
+        self.redshift_column_selector.param.watch(self._redshift_column_selector_cb, "value")
+        
+
         self.plot_settings_panel = pn.Column(self.retrieve_mode_button, 
                                              pn.Row(self.max_separation_input, self.link_to_cutout_checkbox, align = "center"),
-                                             pn.Row(self.redshift_input,  self.query_redshift_checkbox, align = "center"),
+                                             self.plot_lines_checkbox,
+                                             pn.Row(self.redshift_input,  self.query_redshift_button, 
+                                                    self.redshift_column_selector, align = "center"),
                                                     scroll = True, visible = False)
         
     
@@ -761,6 +823,48 @@ class SpectrumPlotClass(CustomPlotClass):
             self._subscribe_to_shared()
         else:
             shared_data.unsubscribe(self.panel_id, "Euclid_radius")
+    
+    def _plot_lines_cb(self, event):
+        if self.spectrum_object.spectra is not None:
+            self._update_plot()
+    
+    def _redshift_input_cb(self, event):
+        redshift = event.new
+        if redshift is not None:
+            spectype = "galaxy" if redshift > 0 else "star"
+            self.spectrum_object._update_info_spectra("spectype", spectype)
+            self.spectrum_object._update_info_spectra("redshift", redshift)
+            self.plot_lines_checkbox.disabled = False
+            if self.plot_lines_checkbox.value:
+                self._update_plot()
+
+    def _query_redshift_cb(self, event):
+        if self.spectrum_object.spectra is not None:
+            self.query_redshift_button.name = "Query Redshift [Running...]"
+            self.spectrum_object.query_specz_table(verbose = True)
+            self.spectrum_object.update_info_from_query()
+            print( self.spectrum_object.specz_table['redshift'])
+            self.query_redshift_button.name = "Query Redshift"
+            self.plot_lines_checkbox.disabled = False
+            if self.plot_lines_checkbox.value:
+                self._update_plot()
+    
+    def _redshift_column_selector_cb(self, event):
+        column = event.new
+        if column == "None":
+            return
+        redshift_value = self.get_value_from_df(column)
+        if redshift_value is not None:
+            self.redshift_input.value = redshift_value
+    
+    def _update_plot(self):
+        plot_model = False if self._is_euclid_spec else True
+        plot_lines = "class" if self.plot_lines_checkbox.value else False
+        kwargs = {"aspect" : 3.8 if self.spectrum_object.available_spectra > 1 else 3.17, "responsive" : True}
+        plot = self.spectrum_object.plot_all_spectra_hv(plot_model = plot_model, plot_lines = plot_lines,
+                                                                **kwargs)
+        self.figure.objects = [plot]
+
     
     def _update_max_separation(self, new_separation):
          self.max_separation_input.value = new_separation
@@ -1103,9 +1207,6 @@ class SEDPlotClass(CustomPlotClass):
         return flux, flux_err
     
 
-
-
-             
     def _initialize_settings_panel(self):     
         output_units = {"microJy" : "fnu", "erg/s/cm2" : "nufnu"}  #first one should be always microJy                                                                           
         self.unit_selector = pn.widgets.Select(name = "Output Units", options = output_units, max_width = 200, max_height = 40, 

@@ -468,9 +468,9 @@ class BaseSpectraClass:
 
 
         if plot_lines == "class":
-            is_extragal = self.spectra[idx].spectype == "GALAXY" or self.spectra[idx].spectype == "QSO"
+            is_extragal = self.spectra[idx].spectype.casefold() in ["galaxy", "qso"]
             plot_emlines = is_extragal and plot_abslines
-            plot_abslines = self.spectra[idx].spectype == "STAR" and plot_abslines
+            plot_abslines = self.spectra[idx].spectype.casefold() == "star" and plot_abslines
         
         elif not plot_lines:
             plot_abslines = False
@@ -846,24 +846,39 @@ class EuclidSpectraClass(BaseSpectraClass):
                                                                    ascending=[True, False]).drop_duplicates("object_id"))
                 self.specz_table= self.specz_table.set_index("object_id").reindex(sourceid_list).reset_index()
                 
-                self.specz_table['redshift'] = np.select(np.select([self.specz_table["spe_class"] == "galaxy",
+                self.specz_table['redshift'] = np.select([self.specz_table["spe_class"] == "galaxy",
                                                                     self.specz_table["spe_class"] == "qso",
                                                                     self.specz_table["spe_class"].isna()],
                                                                    [self.specz_table["gal_z"],
                                                                     np.nan,
-                                                                    np.nan], default=0))
+                                                                    np.nan], 
+                                                                    default=0)
 
             except AttributeError:
-                print("Query returned None")
-                self.specz_table = pd.DataFrame()
+                self.specz_table = None
             
             toc = time.perf_counter()
             if verbose:
                 print(f"Querying Euclid spectroscopic redshift table required {toc-tic} seconds")
     
-
+    def _update_info_spectra(self, attribute, values):
+        """Update the attributes of spectra in self.spectra. Same as _add_info_spectra but more general"""
+        if hasattr(values, "__len__") and (not isinstance(values, str)) and (len(values) == self.available_spectra):
+            for spectrum, value in zip(self.spectra, values):
+                spectrum.set_attribute(attribute, value)
+        else:
+            if hasattr(values, "__len__") and not isinstance(values, str) and len(values) == 1:
+                value = values[0]  
+            else:
+                value = values  # scalar or string
+            for spectrum in self.spectra:
+                spectrum.set_attribute(attribute, value)
         
-        
+    def update_info_from_query(self):
+        for attribute in ["spectype", "redshift"]:
+            col_name = "spe_class" if attribute == "spectype" else attribute 
+            self._update_info_spectra(attribute, self.specz_table[col_name].values)
+   
     
     def get_spectra(self, max_separation = None, return_object = False):
         """Call all methods to get spectra
