@@ -426,7 +426,7 @@ class BaseSpectraClass:
                     continue
                 ax.axvline(obs_wav, c = 'r', lw = 0.5, ls = ':')
                 if annotate_emlines:
-                    ax.text(obs_wav, 0.8, name, rotation = 90, transform = transform, fontsize = 10)
+                    ax.text(obs_wav, 0.8, name, rotation = 90, transform = transform, fontsize = 12)
         
         if plot_abslines and np.isfinite(redshift):
             if not hasattr(self, "absline_table"):
@@ -438,7 +438,7 @@ class BaseSpectraClass:
                     continue
                 ax.axvline(obs_wav, c = 'b', lw = 0.5, ls = ':')
                 if annotate_abslines:
-                    ax.text(obs_wav, 0.2, name, rotation = 90, transform = transform, fontsize = 10)
+                    ax.text(obs_wav, 0.2, name, rotation = 90, transform = transform, fontsize = 12)
         
         
         ax.set_xlabel(r'$\lambda_{obs}~[\AA]$', fontsize = 15)
@@ -452,6 +452,7 @@ class BaseSpectraClass:
                          plot_abslines=True, annotate_abslines=True,
                          plot_mask = True,
                          show_xlabel=True, show_ylabel=True,
+                         plot_info = True,
                          model_kwargs = {"line_width" : 2, "color" : "red"},
                          smoothed_kwargs = {"line_width" : 1, "color" : "black"},
                          **kwargs):
@@ -495,7 +496,7 @@ class BaseSpectraClass:
         ymin, ymax = np.nanmin(smoothed), np.nanmax(smoothed)
         ymin = ymin / 3 if ymin >= 0 else ymin * 1.5
         ymax = ymax * 1.5 if ymax >= 0 else ymax / 3 ##Sometimes Euclid Fluxes are negative
-        xmin, xmax =  xmin, xmax = np.min(wavlen), np.max(wavlen)
+        xmin, xmax = np.min(wavlen), np.max(wavlen)
     
         if plot_emlines and np.isfinite(redshift):
             if not hasattr(self, "emline_table"):
@@ -503,9 +504,9 @@ class BaseSpectraClass:
             obs_wav = self.emline_table["wave_vac"] * (redshift +1)
             logic = np.logical_and(obs_wav >= xmin, obs_wav <= xmax)
             obs_wav = obs_wav[logic]
-            overlays.append(hv.VLines(obs_wav).opts(color='red', line_width=0.5, line_dash='dotted'))
+            overlays.append(hv.VLines(obs_wav).opts(color='red', line_width=1, line_dash='dotted'))
             if annotate_emlines:
-                y = 0.8 * ymax *np.ones_like(obs_wav)
+                y = (ymin + 0.8 * (ymax-ymin)) * np.ones_like(obs_wav)
                 names = self.emline_table["Name"][logic].astype(str)
                 overlays.append(hv.Labels((obs_wav, y,  names), vdims = "names").opts(
                                        text_font_size='8pt', text_color = "black"))
@@ -516,12 +517,19 @@ class BaseSpectraClass:
             obs_wav = self.absline_table["wave_vac"] * (redshift +1)
             logic = np.logical_and(obs_wav >= xmin, obs_wav <= xmax)
             obs_wav = obs_wav[logic]
-            overlays.append(hv.VLines(obs_wav).opts(color='blue', line_width=0.5, line_dash='dotted'))
+            overlays.append(hv.VLines(obs_wav).opts(color='blue', line_width=1, line_dash='dotted'))
             if annotate_abslines:
-                y = 0.2 * ymax *np.ones_like(obs_wav)
+                y = (ymin + 0.8 * (ymax-ymin)) * np.ones_like(obs_wav)
                 names = self.absline_table["Name"][logic].astype(str)
                 overlays.append(hv.Labels((obs_wav, y,  names), vdims = "names").opts(
                                         text_font_size='8pt', text_color = "black"))
+        if plot_info:
+           spectype = self.spectra[idx].spectype
+           if np.isfinite(redshift) and len(spectype)>0:
+               y = (ymin + 0.1 * (ymax-ymin)) 
+               x = (xmin + 0.8 * (xmax-xmin)) 
+               text = f"z = {np.round(redshift,4)}, Type = {spectype.upper()}"
+               overlays.append(hv.Text(x, y, text).opts(text_font_size = "15pt", text_color = "black"))
         
         xlabel = r'$$ \lambda_{obs} ~{Å} $$' if show_xlabel else ''
         ylabel = r'$$ F_{\lambda}~[10^{-17}~erg~s^{-1}~cm^{-2}~{Å}^{-1}] $$' if show_ylabel else ''

@@ -60,7 +60,7 @@ class CustomPlotClass(param.Parameterized):
 
     available_stages = ["columns_selection","plot"]
 
-    stage = param.ObjectSelector(default="columns_selection", objects=available_stages)
+    stage = param.ObjectSelector(default="columns_selection", objects = available_stages)
     
     def __init__(self, data, src, close_button, extra_features):
         super().__init__()
@@ -156,12 +156,12 @@ class CustomPlotClass(param.Parameterized):
 
 
 
-    def _get_selection_widgets_grid(self, columns_to_select, options = None):
+    def _get_selection_widgets_grid(self, columns_to_select, options = None, allowed_types = None):
         settings_grid = pn.GridBox(ncols=3, sizing_mode = "stretch_width", scroll = True)  
         self.select_widgets = {}
         if options is None:
             options = self.get_column_list(excluded_columns = ["ra_dec", "label_col"],
-                              excluded_types = ["object"], allowed_types = [])
+                              excluded_types = ["object"], allowed_types = allowed_types)
         if len(columns_to_select) > 0:
             for col in columns_to_select:
                 select_widget = pn.widgets.Select(name= col, options=options, max_height=120, sizing_mode = "stretch_width")
@@ -170,17 +170,24 @@ class CustomPlotClass(param.Parameterized):
         return settings_grid
         
 
-    def columns_selection_panel(self, columns_to_select, skippable = False):
+    def columns_selection_panel(self, columns_to_select, skippable = False,
+                                options = None, allowed_types = None,
+                                info_text = None):
+        settings_grid = self._get_selection_widgets_grid(columns_to_select, options = options, 
+                                                         allowed_types = allowed_types)
         
-        settings_grid = self._get_selection_widgets_grid(columns_to_select)
         submit_button = pn.widgets.Button(name='Confirm', button_type='primary', max_height=120)
         submit_button.on_click(self._submit_button_cb)
         skip_button = pn.widgets.Button(name='Skip', button_type='primary', max_height=120)
         skip_button.on_click(self._skip_button_cb)
         if not skippable:
             skip_button.disabled = True
-
-        return pn.Card(settings_grid, header = pn.Row(pn.Spacer(width=25), self.close_button, skip_button, submit_button),
+        if info_text is not None:
+           card_content = pn.Column(pn.pane.Markdown(info_text, sizing_mode="stretch_width", margin=(15,0,15,15)), 
+                                           settings_grid)
+        else:
+           card_content = settings_grid
+        return pn.Card(card_content, header = pn.Row(pn.Spacer(width=25), self.close_button, skip_button, submit_button),
                                 sizing_mode="stretch_both", scroll=True, collapsible = False, min_height = 300 )
 
     
@@ -189,7 +196,6 @@ class CustomPlotClass(param.Parameterized):
                             ready_stage = "plot"):
         """
         Check if required columns exist in config.settings or config.main_df.
-        
         columns_needed : list, Columns that are required.
         change_stage : bool, optional, change stage when unknown columns are found
         unknown_stage : str, optional, stage to set if unknown columns are present (default 'columns_selection').
@@ -330,8 +336,7 @@ class EuclidPlotClass(CustomPlotClass):
     def _initialise_euclid_object(self):
         self.ra, self.dec = self.get_ra_dec()
         if (self.ra is None) or (self.dec is None):
-            print("no ra or dec available")
-            #TODO Raise exception
+            raise ValueError("RA or DEC is missing")
         else:
             self.euclid_object = EuclidCutoutsClass(self.ra, self.dec, 
                              euclid_filters= ["VIS", "NIR_Y", "NIR_J", "NIR_H"],
@@ -604,7 +609,7 @@ class EuclidPlotClass(CustomPlotClass):
         self.message_pane.visible = True
         if not self.euclid_object.has_coverage:
             print("The Source is not contained in Euclid mocs")
-            self.message_pane.object = "##The source is not in the Euclid covered area"
+            self.message_pane.object = "## The source is not in the Euclid covered area"
             self.figure.object =  self.get_empty_image()
 
         shared_data.publish(self.panel_id, "EuclidCutout_running", True)
@@ -792,11 +797,11 @@ class SpectrumPlotClass(CustomPlotClass):
         
 
         self.plot_settings_panel = pn.Column(self.retrieve_mode_button, 
-                                             pn.Row(self.max_separation_input, self.link_to_cutout_checkbox, align = "center"),
+                                             pn.Row(self.max_separation_input, pn.Column(pn.Spacer(height=23), self.link_to_cutout_checkbox), align = "center"),
                                              self.plot_lines_checkbox,
                                              pn.Row(self.redshift_input,  self.query_redshift_button, 
-                                                    self.redshift_column_selector, align = "center"),
-                                                    scroll = True, visible = False)
+                                             self.redshift_column_selector, align = "center"),
+                                             scroll = True, visible = False)
         
     
     def _retrieve_mode_cb(self, event):
@@ -843,11 +848,10 @@ class SpectrumPlotClass(CustomPlotClass):
             self.query_redshift_button.name = "Query Redshift [Running...]"
             self.spectrum_object.query_specz_table(verbose = True)
             self.spectrum_object.update_info_from_query()
-            print( self.spectrum_object.specz_table['redshift'])
-            self.query_redshift_button.name = "Query Redshift"
             self.plot_lines_checkbox.disabled = False
             if self.plot_lines_checkbox.value:
                 self._update_plot()
+        self.query_redshift_button.name = "Query Redshift"
     
     def _redshift_column_selector_cb(self, event):
         column = event.new
@@ -868,6 +872,15 @@ class SpectrumPlotClass(CustomPlotClass):
     
     def _update_max_separation(self, new_separation):
          self.max_separation_input.value = new_separation
+
+    
+    @param.depends("stage")                        
+    def mypanel(self):
+        if self.stage == "columns_selection":
+            return self.columns_selection_panel(self.unknown_columns, allowed_types = ["int"],
+                                                info_text= "## Select column with TargetID")
+        else:
+            return self.plot_panel()
 
 
 class SEDPlotClass(CustomPlotClass):
@@ -917,8 +930,8 @@ class SEDPlotClass(CustomPlotClass):
             filter_data = json.load(f)
         return filter_data
     
-    def create_checkbox_tooltip(self, band, name, wavlen, fwhm):
-        checkbox = pn.widgets.Checkbox(name=band, value=False, width=150)
+    def create_checkbox_tooltip(self, band, name, wavlen, fwhm, value = False):
+        checkbox = pn.widgets.Checkbox(name=band, value=value, width=150)
         tooltip_text = f"{name},  (Wavelength: {wavlen} Å, FWHM: {fwhm} Å)"
         tooltip_icon = pn.widgets.TooltipIcon(value=tooltip_text, margin=(0, 0, 0, 0))
         return checkbox, tooltip_icon
@@ -928,7 +941,8 @@ class SEDPlotClass(CustomPlotClass):
         self.checkbox_group = [] #List storing all pairs of checkbox-tooltip
         for band, info in self.filter_data.items():
             checkbox, tooltip_icon = self.create_checkbox_tooltip(band, info["name"], 
-                                                                  info["wavelength"], info["FWHM"])
+                                                                  info["wavelength"], info["FWHM"],
+                                                                   value = band in config.settings["bands_used_SED"])
             self.checkbox_group.append(pn.Row(checkbox, tooltip_icon, align='center'))
             self.checkboxes[band] = checkbox
 
@@ -1044,10 +1058,14 @@ class SEDPlotClass(CustomPlotClass):
 
         master_select_widget = pn.widgets.Select(name= "Apply same units to all columns", options=available_units, max_height=120, sizing_mode = "stretch_width")
         master_select_widget.param.watch(change_all_selections, "value")
+         
         
-        return pn.Card(pn.Column(master_select_widget,settings_grid, scroll = True),
-                       header = pn.Row(pn.Spacer(width=25), self.close_button, skip_button, submit_button),
-                       sizing_mode="stretch_both", scroll=True, collapsible = False, min_height = 300 )
+        return pn.Card(pn.Column(pn.pane.Markdown("## Select the columns units", sizing_mode = "stretch_width",
+                                                  margin=(15,0,15,15)),
+                                master_select_widget,
+                                settings_grid, scroll = True),
+                                header = pn.Row(pn.Spacer(width=25), self.close_button, skip_button, submit_button),
+                                sizing_mode="stretch_both", scroll=True, collapsible = False, min_height = 300 )
     
 
 
@@ -1097,7 +1115,7 @@ class SEDPlotClass(CustomPlotClass):
 
         mask = np.logical_and(np.isfinite(wavlen), np.isfinite(flux))
         if np.sum(mask) < 1:
-            return pn.pane.Markdown(f"##There are no available points to plot. All specified bands have nan values") 
+            return pn.pane.Markdown(f"## There are no available points to plot. All specified bands have nan values") 
         x = wavlen[mask] / (1 + redshift)
         y = flux[mask]
         err_y = flux_err[mask]
@@ -1156,11 +1174,9 @@ class SEDPlotClass(CustomPlotClass):
         y_start, y_end = fig.y_range.start, fig.y_range.end
         mag_start, _ = SEDPlotClass.flux_to_mag(y_start, 0)
         mag_end, _  =  SEDPlotClass.flux_to_mag(y_end, 0)
-
+        
         #Note mag_start and end are reversed compared to fluxes
-
         fig.extra_y_ranges = {"mag": Range1d(start=mag_start, end=mag_end)}
-
         mag_axis = LinearAxis(y_range_name="mag", axis_label="AB Magnitude",
                               major_label_text_color="black", axis_label_text_color="black")
         fig.add_layout(mag_axis, 'right')
@@ -1191,8 +1207,7 @@ class SEDPlotClass(CustomPlotClass):
                 flux_converted.append(fc)
                 err_converted.append(ec)
             except KeyError:
-                print("I cannot fint this unit:")
-                print(unit)
+                print(f"I cannot find this unit: {unit}")
                 flux_converted.append(np.nan)
                 err_converted.append(np.nan)
 
@@ -1234,17 +1249,26 @@ class SEDPlotClass(CustomPlotClass):
         if self.stage == self.available_stages[0]:
             return self.filters_selection_panel()
         elif self.stage == self.available_stages[1]:
-            return self.columns_selection_panel([i for i in self.bands_to_plot if i in self.unknown_columns], 
-                                               skippable=False)
+            columns_to_select = [i for i in self.bands_to_plot if i in self.unknown_columns]
+            if len(columns_to_select) > 0:
+                return self.columns_selection_panel(columns_to_select, skippable=False, allowed_types = ["float"],
+                                            info_text= "## Select columns with flux values")
+            else:
+                self.stage = self.available_stages[2]
+        
         elif self.stage == self.available_stages[2]:
-            return self.columns_selection_panel([i for i in self.error_bands_to_plot if i in self.unknown_columns],
-                                               skippable=True)
+            columns_to_select = [i for i in self.error_bands_to_plot if i in self.unknown_columns]
+            if len(columns_to_select) > 0:
+                return self.columns_selection_panel(columns_to_select, skippable=True, allowed_types = ["float"],
+                                        info_text= "## Select columns with flux error values")
+            else:
+                self.stage = self.available_stages[3]
+
         elif self.stage == self.available_stages[3]:
             return self.units_selection_panel(self.bands_to_plot)
+        
         else:
             return self.plot_panel()
-
-
 
 
 class RadioClass(CustomPlotClass):
@@ -1261,7 +1285,7 @@ class RadioClass(CustomPlotClass):
         self.ra, self.dec = self.get_ra_dec()
         if (self.ra is None) or (self.dec is None):
             self.message_pane.visible = True
-            self.message_pane.object = ["Missing Ra and dec"]   
+            self.message_pane.object = ["## Missing Ra and Dec"]   
 
     def _change_source_cb(self, attr, old, new):
         self._initialize_source()
