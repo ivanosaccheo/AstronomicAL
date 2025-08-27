@@ -257,7 +257,7 @@ def update_config_settings(imported_config):
         elif key == "bands_used_SED":
             config.settings[key] = imported_config[key]
             #for k, value in imported_config[key].items():
-                #config.settings[k] = value
+              #config.settings[k] = value
 
         else:
             config.settings[key] = imported_config[key]

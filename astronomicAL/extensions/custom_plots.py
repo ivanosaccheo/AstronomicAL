@@ -70,7 +70,7 @@ class CustomPlotClass(param.Parameterized):
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         self.close_button = close_button
         self.panel_id = str(uuid.uuid4()) 
-        self.get_unknown_columns(self.extra_features)
+        self._get_unknown_columns(self.extra_features)
         self.figure = pn.pane.HoloViews(sizing_mode="stretch_both")
         self.message_pane = pn.pane.Markdown("## Loading...", sizing_mode="stretch_both", max_height = 30)
         self.plot_settings_button = pn.widgets.Button(name="Open Settings", button_type="primary", max_height = 40, max_width=100, sizing_mode="stretch_both" )
@@ -191,7 +191,8 @@ class CustomPlotClass(param.Parameterized):
                                 sizing_mode="stretch_both", scroll=True, collapsible = False, min_height = 300 )
 
     
-    def get_unknown_columns(self, columns_needed, change_stage = False,
+    def _get_unknown_columns(self, columns_needed, change_stage = False,
+                            check_key = "default",
                             unknown_stage  = "columns_selection",
                             ready_stage = "plot"):
         """
@@ -810,7 +811,7 @@ class SpectrumPlotClass(CustomPlotClass):
             self.chosen_mode = event.new
             self.link_to_cutout_checkbox.disabled = True
             self.max_separation_input.disabled = True
-            self.get_unknown_columns([f"{self.dataset}_TargetID"], change_stage=True)
+            self._get_unknown_columns([f"{self.dataset}_TargetID"], change_stage=True)
         elif event.new == "Cone Search":
             self.from_sourceId = False
             self.chosen_mode = event.new
@@ -947,10 +948,10 @@ class SEDPlotClass(CustomPlotClass):
             self.checkboxes[band] = checkbox
 
     def _initialize_add_band(self):
-        self.short_name_input = pn.widgets.TextInput(name="Short Filter Name")
-        self.full_name_input = pn.widgets.TextInput(name="Full Filter Name", value ="")
-        self.wavelength_input = pn.widgets.FloatInput(name="Effective Wavelength [Å]")
-        self.fwhm_input = pn.widgets.FloatInput(name="FWHM [Å]", value = 0)
+        self.short_name_input = pn.widgets.TextInput(name = "Short Filter Name")
+        self.full_name_input = pn.widgets.TextInput(name = "Full Filter Name", value = "")
+        self.wavelength_input = pn.widgets.FloatInput(name = "Effective Wavelength [Å]")
+        self.fwhm_input = pn.widgets.FloatInput(name= "FWHM [Å]", value = 0)
         confirm_button = pn.widgets.Button(name="Confirm", button_type="primary")
 
         self.add_band_pane = pn.Column(self.short_name_input, self.full_name_input, 
@@ -962,8 +963,8 @@ class SEDPlotClass(CustomPlotClass):
 
     def update_photometric_file(self, new_band, name, wavlen, fwhm):
         self.filter_data[new_band] = {"name" : name, 
-                                    "wavelength" : wavlen,
-                                    "FWHM" : fwhm}
+                                      "wavelength" : wavlen,
+                                      "FWHM" : fwhm}
         
     def _toggle_add_band_cb(self, event):
         self.add_band_pane.visible = not self.add_band_pane.visible
@@ -1019,7 +1020,7 @@ class SEDPlotClass(CustomPlotClass):
         self.bands_to_plot = [band for band in self.checkboxes.keys() if  self.checkboxes[band].value]
         config.settings["bands_to_plot_SED"] = self.bands_to_plot
         self.error_bands_to_plot = [f"err_{band}" for band in self.bands_to_plot]
-        self.get_unknown_columns(self.bands_to_plot+self.error_bands_to_plot, ready_stage=self.available_stages[3],
+        self._get_unknown_columns(self.bands_to_plot+self.error_bands_to_plot, ready_stage=self.available_stages[3],
                                  change_stage=True)
 
 
@@ -1115,7 +1116,7 @@ class SEDPlotClass(CustomPlotClass):
 
         mask = np.logical_and(np.isfinite(wavlen), np.isfinite(flux))
         if np.sum(mask) < 1:
-            return pn.pane.Markdown(f"## There are no available points to plot. All specified bands have nan values") 
+            return pn.pane.Markdown(f"## There are no available points to plot. All specified bands have NaN values") 
         x = wavlen[mask] / (1 + redshift)
         y = flux[mask]
         err_y = flux_err[mask]
