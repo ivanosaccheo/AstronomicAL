@@ -127,7 +127,7 @@ class ActiveLearningSettings(param.Parameterized):
             options=[],
             width=500,
             max_width=500,
-            sizing_mode="fixed",
+            # sizing_mode="fixed",
         )
 
         self.feature_selector._buttons[True].on_click(self._verify_valid_selection_cb)
@@ -156,10 +156,10 @@ class ActiveLearningSettings(param.Parameterized):
         )
         self._remove_feature_generator_button.on_click(self._remove_feature_selector_cb)
 
-        self._feature_generator_dataframe = pn.widgets.DataFrame(
+        self._feature_generator_dataframe = pn.pane.DataFrame(
             pd.DataFrame(self.feature_generator_selected, columns=["oper", "n"]),
             name="",
-            show_index=False,
+            index=False,
         )
 
         self.default_x_variable = pn.widgets.Select(
@@ -179,7 +179,7 @@ class ActiveLearningSettings(param.Parameterized):
         )
 
         self._exclude_labels_tooltip = pn.pane.HTML(
-            "<span data-toggle='tooltip' title='If enabled, this will remove the unused labels from train, val and test sets. All other plots remain unaffected.' style='border-radius: 15px;padding: 5px; background: #5e5e5e; ' >❔</span> ",
+            "<span data-toggle='tooltip' title='If enabled, this will remove the unused labels from train, val and test sets. All other plots remain unaffected.' styles='border-radius: 15px;padding: 5px; background: #5e5e5e; ' >❔</span> ",
             max_width=5,
         )
 
@@ -188,7 +188,7 @@ class ActiveLearningSettings(param.Parameterized):
         )
 
         self._scale_features_tooltip = pn.pane.HTML(
-            "<span data-toggle='tooltip' title='If enabled, this can improve the performance of your model, however will require you to scale all new data with the produced scaler. This scaler will be saved in your model directory.' style='border-radius: 15px;padding: 5px; background: #5e5e5e; ' >❔</span> ",
+            "<span data-toggle='tooltip' title='If enabled, this can improve the performance of your model, however will require you to scale all new data with the produced scaler. This scaler will be saved in your model directory.' styles='border-radius: 15px;padding: 5px; background: #5e5e5e; ' >❔</span> ",
             max_width=5,
         )
 
@@ -227,12 +227,12 @@ class ActiveLearningSettings(param.Parameterized):
             value=True,
         )
         self._exclude_unknown_labels_tooltip = pn.pane.HTML(
-            "<span data-toggle='tooltip' title='If enabled, this will remove the unknown labels from train, val and test sets. By not removing unknown labels you will have more data, however your accuracy metrics will be affected.' style='border-radius: 15px;padding: 5px; background: #5e5e5e; ' >❔</span> ",
+            "<span data-toggle='tooltip' title='If enabled, this will remove the unknown labels from train, val and test sets. By not removing unknown labels you will have more data, however your accuracy metrics will be affected.' styles='border-radius: 15px;padding: 5px; background: #5e5e5e; ' >❔</span> ",
             max_width=5,
         )
 
         self._memory_opt_tooltip = pn.pane.HTML(
-            "<span data-toggle='tooltip' title='These are the axes that will be displayed in the Active Learning panel. This does not restrict the axes in any of the other plots.' style='border-radius: 15px;padding: 5px; background: #5e5e5e; ' >❔</span> ",
+            "<span data-toggle='tooltip' title='These are the axes that will be displayed in the Active Learning panel. This does not restrict the axes in any of the other plots.' styles='border-radius: 15px;padding: 5px; background: #5e5e5e; ' >❔</span> ",
             max_width=5,
         )
 
@@ -285,6 +285,10 @@ class ActiveLearningSettings(param.Parameterized):
         """
         if dataframe is not None:
             self.df = dataframe
+            #if self.df.columns.duplicated().any():     
+            #    duplicates = self.df.columns[self.df.columns.duplicated()].tolist()
+            #    self.df = self.df.loc[:, ~self.df.columns.duplicated()]
+            #    print(f"Removed columns with duplicate column names: {duplicates}")
 
         if self.df is not None:
 
@@ -314,11 +318,12 @@ class ActiveLearningSettings(param.Parameterized):
             self.feature_generator_selected.append(
                 [self.feature_generator.value, self.feature_generator_number.value]
             )
-            self._feature_generator_dataframe.value = pd.DataFrame(
+            self._feature_generator_dataframe.object = pd.DataFrame(
                 self.feature_generator_selected, columns=["oper", "n"]
             )
 
         self._update_default_var_lists()
+
 
     def _update_default_var_lists(self):
 
@@ -329,7 +334,6 @@ class ActiveLearningSettings(param.Parameterized):
         if selected_features == []:
             return
         else:
-
             oper_dict = feature_generation.get_oper_dict()
 
             for generator in self.feature_generator_selected:
@@ -341,24 +345,36 @@ class ActiveLearningSettings(param.Parameterized):
                     pd.DataFrame(columns=selected_features), n
                 )
                 selected_features = selected_features + generated_features
-
+            #selected_features = list(dict.fromkeys(selected_features)) # Removes duplicates (currently the same operation can be performed more than once)
+            
+        
         self.default_x_variable.options = selected_features
         self.default_y_variable.options = selected_features
 
     def _remove_feature_selector_cb(self, event):
         self.feature_generator_selected = self.feature_generator_selected[:-1]
-        self._feature_generator_dataframe.value = pd.DataFrame(
+        self._feature_generator_dataframe.object = pd.DataFrame(
             self.feature_generator_selected, columns=["oper", "n"]
         )
 
         self._update_default_var_lists()
 
     def get_default_variables(self):
+        x_var = self.default_x_variable.value
+        y_var = self.default_y_variable.value
+        if x_var == y_var:
+            print("X and Y variables cannot be the same, using the next available option")   #TODO Print on the dashboard rather than in terminal
+            if len(self.default_x_variable.options) > 1:
+                for option in self.default_x_variable.options:
+                    if option != x_var:
+                        y_var = option
+                        break
+    
+        return (x_var, y_var)
 
-        return (
-            self.default_x_variable.value,
-            self.default_y_variable.value,
-        )
+
+
+      
 
     def _confirm_settings_cb(self, event):
         print("Saving settings...")
@@ -428,6 +444,7 @@ class ActiveLearningSettings(param.Parameterized):
             settings Dashboard.
 
         """
+        
         if self.completed:
             self.column[0] = pn.pane.Str("Settings Saved.")
 
@@ -470,7 +487,7 @@ class ActiveLearningSettings(param.Parameterized):
                         self._remove_feature_generator_button,
                     ),
                     self._feature_generator_dataframe,
-                    sizing_mode="stretch_width",
+                   sizing_mode="stretch_width",
                 ),
                 pn.Row(
                     self.default_x_variable,
