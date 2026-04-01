@@ -1,13 +1,16 @@
 from dataclasses import dataclass, field
 import copy
+import warnings
 import numpy as np 
 from astropy.visualization import  PowerStretch, SqrtStretch, LogStretch
 from astropy.visualization import AsinhStretch, LinearStretch, AsymmetricPercentileInterval, MinMaxInterval, PercentileInterval
-from astropy.wcs import WCS
+from astropy.wcs import WCS, FITSFixedWarning
 from reproject import reproject_interp
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 from astropy.wcs.utils import proj_plane_pixel_scales
+from astropy.nddata import Cutout2D
+from astropy.modeling.functional_models import Gaussian2D
 
 
 
@@ -407,3 +410,107 @@ class ImageVisaulizationClass:
         
         return scales_arcsec[0], scales_arcsec[1]
     
+
+class ALMAPlotClass:
+    def __init__(self, header,
+                 data,
+                 wcs = None, 
+                 radius = None,
+                 coordinates = None):
+        self.data = data
+        self.header = header
+        self.wcs = wcs
+        if self.wcs is None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FITSFixedWarning)
+                self.wcs = WCS(self.header).celestial
+        self.ndim = self.data.ndim
+        self.coordinates = coordinates or SkyCoord(self.header["CRVAL1"], self.header["CRVAL2"], unit = "deg")
+        if radius is not None:
+            self.image, self.image_wcs = self.make_cutout(radius = radius)
+        else:
+            self.image = self.data.squeeze()
+            self.image_wcs = self.wcs
+        
+    def make_cutout(self, radius =  5 * u.arcsec):
+        if self.ndim == 3:
+            plane = self.data[0,...]
+        elif self.ndim == 4:
+            plane = self.data[0,0,...]
+        else:
+            plane = self.data
+        cutout = Cutout2D(plane, position= self.coordinates, size=radius, wcs=self.wcs)
+        y_slice = cutout.slices_original[0]
+        x_slice = cutout.slices_original[1]
+        if self.ndim == 3:  # (frequency, y, x)
+            image = self.data[:, y_slice, x_slice].squeeze()
+        elif self.ndim == 4:  # (stokes, frequency, y, x)
+            image = self.data[:, :, y_slice, x_slice].squeeze()
+        else:
+            image = cutout.data  
+        return image, cutout.wcs
+
+    def get_frequency_range(self):
+        if self.ndim == 3:
+            pixels = np.arange(0, self.data.shape[0],1)
+        elif self.ndim == 4:
+            pixels = np.arange(0, self.data.shape[1],1)
+        else:
+            raise ValueError("Data has no frequency range")
+        self.frequencies = self.header["CRVAL3"] + (pixels - self.header["CRPIX3"]) * self.header["CDELT3"]
+        return self.frequencies
+    
+    def get_wavelength_range(self):
+        wavelength_range = 2.998e14/self.get_frequency_range()
+        return  wavelength_range
+    
+    def map_wavelength_indexes(self, wav_start, wav_end):
+        """Given a starting wavelength wav_start and 
+        and ending one wav_end (in microns) returns the indexes along the first axis which correspond to that interval"""
+        
+        f_start, f_end = 2.998e14/wav_end, 2.998e14/wav_start
+        
+        return self.map_frequency_indexes(f_start, f_end)
+
+    def map_frequency_indexes(self, f_start, f_end):
+        """Given a starting frequency f_start and 
+        and ending one f_end returns the indexes along the first axis which correspond to that interval"""
+        if not hasattr(self, "frequencies"):
+            _ = self.get_frequency_range()
+        freq_array = self.frequencies
+        low, high = (f_start, f_end) if f_start <= f_end else (f_end, f_start)
+        idx = np.where((freq_array >= low) & (freq_array <= high))[0]
+        if len(idx) == 0:
+            raise ValueError("No spectral channels found in the requested frequency range.")
+        return idx
+    
+    def get_beam_model(self, x0 = 0, y0 = 0):
+        sigma_x = self.header['BMAJ'] / (2*np.sqrt(2*np.log(2))) / np.abs(self.header['CDELT1'])
+        sigma_y = self.header['BMIN'] / (2*np.sqrt(2*np.log(2))) / np.abs(self.header['CDELT2'])
+        theta   = np.deg2rad(self.header['BPA'])
+        beam = Gaussian2D(1, x0, y0, sigma_x, sigma_y, theta)
+        return beam
+    
+    def get_weighted_spectrum(self, x0 = None, y0 = None, coordinates = None):
+        if (x0 is None) or (y0 is None):
+            coordinates = coordinates or self.coordinates
+            x0, y0 = self.wcs.world_to_pixel(coordinates)
+        x0, y0 = int(x0), int(y0)
+        beam_model  = self.get_beam_model()
+        size_x = int(3 * beam_model.x_stddev.value)
+        size_y = int(3 * beam_model.y_stddev.value)
+        y_min, y_max = y0 - size_y, y0 + size_y + 1
+        x_min, x_max = x0 - size_x, x0 + size_x + 1
+        if self.ndim == 3:
+            subcube = self.data[:, y_min:y_max, x_min:x_max]
+        elif self.ndim == 4:
+            subcube = self.data[0, :, y_min:y_max, x_min:x_max]
+        else:
+            raise ValueError("Unsupported data dimensions")
+        
+        yy, xx = np.mgrid[-size_y:size_y+1, -size_x:size_x+1]
+        beam = beam_model(xx, yy)
+        beam /= beam.sum()
+        weighted_spectrum = (subcube * beam).sum(axis=(1, 2))
+        
+        return weighted_spectrum

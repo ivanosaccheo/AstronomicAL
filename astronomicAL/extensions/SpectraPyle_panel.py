@@ -94,7 +94,7 @@ class SpectraPylePanel(param.Parameterized):
                            doc = "Minimum number of dithers in the coadded 1D spectrum. Higher is better. Note: Euclid Q1 max dithers = 4 (recommended ≥ 2).")
     
     #Input/Output
-    spectra_dir = param.String(default = '', allow_None = True, doc = "Leave empty if single paths are complete")
+    spectra_dir = param.String(default = 'data/INDIVIDUAL_FITS/spectra', allow_None = True)
     output_dir = param.String(default = "data", allow_None = False)
     filename_out = param.String(default = "AUTO", allow_None= False, doc = "'AUTO' will generate an automatic filename")
     spectra_path_column = param.Selector(default = [], objects =[],  allow_None = False)
@@ -106,8 +106,8 @@ class SpectraPylePanel(param.Parameterized):
     spectra_mode = param.Selector(objects =["individual fits", "metadata path", "combined fits"],
                                    default =  "individual fits", doc="Spectra format")
     
-    input_dir = param.String(default = "Boh", allow_None= False)
-    filename_in = param.String(default = "Boh", allow_None= False)
+    input_dir = param.String(default = "data/INDIVIDUAL_FITS", allow_None= False)
+    filename_in = param.String(default = "catalog_list_path", allow_None= False)
     filename_in_extention = param.Selector(default = "csv", objects =["npz", "fits", "csv"],  allow_None = False)
 
 

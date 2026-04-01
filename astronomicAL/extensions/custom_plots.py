@@ -27,8 +27,8 @@ def get_customplot_dict():
 
     plot_dict = {
         
-        "Euclid Cutout" : lambda data, src, close_button : EuclidPlotClass(data, src, close_button,
-                                                           extra_features=[]),
+        #"Euclid Cutout" : lambda data, src, close_button : EuclidPlotClass(data, src, close_button,
+        #                                                   extra_features=[]),
 
         "DESI Spectra"  : lambda data, src, close_button : SpectrumPlotClass(data, src, close_button,
                                                             extra_features=[], dataset="DESI"), 

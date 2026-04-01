@@ -7,12 +7,29 @@ import param
 import matplotlib.pyplot as plt
 
 from astronomicAL.extensions.custom_panels_layouts import CustomPanel
-from astronomicAL.extensions.astro_visualization_utility import ImageVisaulizationClass
+from astronomicAL.extensions.astro_visualization_utility import ImageVisaulizationClass, ALMAPlotClass
 from astronomicAL.extensions.shared_data import shared_data
-from astronomicAL.extensions.astro_data_utility import EuclidCutoutsClass
+from astronomicAL.extensions.astro_data_utility import EuclidCutoutsClass, AlmaCutoutClass
+
+
+
+def get_customplot_dict_new():
+
+    plot_dict = {
+        
+        "Euclid Cutout" : lambda data, src, close_button : EuclidImagePanel(data, src, close_button),
+
+     }
+
+    return plot_dict
+
+
+
+
 
 
 class AstroImagePanel(CustomPanel):
+
     """Panel for rendering and interacting with astrophysics image cutouts.
 
     Inherits general panel machinery (source callbacks, shared data subscriptions,
@@ -20,6 +37,7 @@ class AstroImagePanel(CustomPanel):
     widgets and coordinates with ImageVisaulizationClass for all pixel
     transformations. Data retrieval is delegated to _get_images_function, which
     must be implemented by concrete subclasses.
+    
     """
 
     filter = param.Selector(objects=[""], default="", doc="Band to be shown")
@@ -43,7 +61,7 @@ class AstroImagePanel(CustomPanel):
                              doc="Clipping range of G channel")
     clipping_b = param.Range(default=(0., 1.), bounds=(0, 1), step=0.01,
                              doc="Clipping range of B channel")
-    source_coordinates = param.Boolean(default=False, doc="Overplot source coordinates")
+    source_coordinates = param.Boolean(default=False, doc= "Overplot source coordinates")
     external_coordinates = param.Boolean(default=False, doc="Overplot external coordinates")
 
     def __init__(self,
@@ -71,8 +89,7 @@ class AstroImagePanel(CustomPanel):
         self.param.watch(self._update_settings_dictionary_cb, list(self.param))
         self._manage_subscriptions()
 
-    # Bridge: CustomPanel._change_source_cb calls self._get_data() synchronously;
-    # override it here to schedule the async version instead.
+
     def _change_source_cb(self, attr, old, new):
         asyncio.ensure_future(self._get_data())
 
@@ -249,9 +266,7 @@ class AstroImagePanel(CustomPanel):
         asyncio.ensure_future(self._get_data())
         return super().panel()
 
-    # ------------------------------------------------------------------
-    # Plot rendering
-    # ------------------------------------------------------------------
+
 
     @param.depends("filter", "clipping", "stretching", "scaling",
                    "source_coordinates", "external_coordinates",
@@ -382,9 +397,6 @@ class AstroImagePanel(CustomPanel):
         self._attach_stream(plot_x, lambda event: self._update_plot())
         self.figure.object = (plot_x + plot_y).cols(1).opts(sizing_mode="stretch_both")
 
-    # ------------------------------------------------------------------
-    # External coordinate subscriptions
-    # ------------------------------------------------------------------
 
     def _add_external_coordinates(self, coordinates, dataset):
         """Store coordinates published by another panel and optionally refresh the plot.
@@ -421,9 +433,6 @@ class AstroImagePanel(CustomPanel):
             if existing:
                 self._add_external_coordinates(existing, panel)
 
-    # ------------------------------------------------------------------
-    # Settings persistence
-    # ------------------------------------------------------------------
 
     def _get_default_settings(self):
         return {
@@ -483,24 +492,24 @@ class EuclidImagePanel(AstroImagePanel):
                  euclid_bands=None,
                  color_bands=None,
                  check_moc_coverage=False,
-                 panels_to_subscribe=None):
+                 panels_to_subscribe=["DESI", "EuclidSpec", "SDSS"]):
 
         # Must be set before super().__init__ because _get_data is called there.
         self.euclid_bands = euclid_bands or self._EUCLID_BANDS
         self.check_moc_coverage = check_moc_coverage
-        self.euclid_object = None
+        self.euclid_object = EuclidCutoutsClass(
+                                bands_to_retrieve=self.euclid_bands,
+                                client=shared_data.get_data("Euclid_client"),
+                                check_moc_coverage=self.check_moc_coverage)
 
         super().__init__(
             data, src, close_button,
             panel_name=panel_name,
             color_image=True,
             color_bands=color_bands or self._DEFAULT_COLOR_BANDS,
-            panels_to_subscribe=panels_to_subscribe,
+            panels_to_subscribe = panels_to_subscribe,
         )
 
-    # ------------------------------------------------------------------
-    # Settings panel — extend parent with Euclid-specific controls
-    # ------------------------------------------------------------------
 
     def _initialise_settings_panel(self):
         super()._initialise_settings_panel()
@@ -561,13 +570,9 @@ class EuclidImagePanel(AstroImagePanel):
         password = self.password_input.value or None
         try:
             self.euclid_object.change_environment(env, user=user, password=password)
-            print(f"[{self.__class__.__name__}] Switched to environment: {env}")
+            print(f"Switched to environment: {env}")
         except Exception as e:
             self.get_error_panel("Environment change failed", str(e))
-
-    # ------------------------------------------------------------------
-    # Data retrieval
-    # ------------------------------------------------------------------
 
     def _get_images_function(self, ra, dec, radius):
         """Manage the EuclidCutoutsClass lifecycle and return image arrays.
@@ -582,27 +587,25 @@ class EuclidImagePanel(AstroImagePanel):
         wcs_list : list of astropy.wcs.WCS
         available_bands : list of str
         """
-        if self.euclid_object is None:
-            self.euclid_object = EuclidCutoutsClass(
-                bands_to_retrieve=self.euclid_bands,
-                client=shared_data.get_data("Euclid_client"),
-                check_moc_coverage=self.check_moc_coverage,
-            )
+        print("Coordinates")
+        print(ra, dec)
 
-        self.euclid_object.get_cutouts(ra, dec, radius)
+        data_dict, wcs_dict = self.euclid_object.get_cutouts(ra=ra, dec=dec, radius=radius)
 
-        if self.euclid_object.error_tracker.has_error:
+        if (data_dict is None) or (wcs_dict is None):
+            print(self.euclid_object.error_tracker.error)
+            print(self.euclid_object.error_tracker.error_message)
             raise RuntimeError("EuclidCutoutsClass reported an error during get_cutouts")
 
         available_bands = [b for b in self.euclid_bands
-                           if b in self.euclid_object.data and
-                           self.euclid_object.data[b] is not None]
+                           if (b in data_dict) and (data_dict[b] is not None)]
 
         if not available_bands:
             raise RuntimeError("No Euclid bands were retrieved successfully")
 
-        images = [self.euclid_object.data[b] for b in available_bands]
-        wcs_list = [self.euclid_object.wcs[b] for b in available_bands]
+        images = [data_dict[b] for b in available_bands]
+        wcs_list = [wcs_dict[b] for b in available_bands]
+        
         return images, wcs_list, available_bands
 
 
@@ -615,3 +618,65 @@ class EuclidImagePanel(AstroImagePanel):
                 )
             except Exception as e:
                 print(f"[{self.__class__.__name__}] Could not export FITS: {e}")
+
+
+
+class AlmaCutoutPanel(AstroImagePanel):
+    filter = None
+    gamma_r = None
+    gamma_g = None
+    gamma_b = None
+    clipping_r = None
+    clipping_g = None
+    clipping_b = None
+    def __init__(self,
+                data,
+                src,
+                close_button,
+                panel_name="Alma_Cutout"):
+    
+        super().__init__(
+            data, src, close_button,
+            panel_name=panel_name,
+            color_image=False)
+        
+
+    def _initialise_settings_panel(self):
+        self.param_widgets = {
+            "radius": pn.widgets.FloatInput.from_param(
+                self.param.radius, width=120, height=80),
+            "stretching": pn.widgets.Select.from_param(
+                self.param.stretching, width=200, height=80),
+            "scaling": pn.widgets.Select.from_param(
+                self.param.scaling, width=200, height=80),
+            "clipping": pn.widgets.RangeSlider.from_param(
+                self.param.clipping, max_width=200, sizing_mode="stretch_both"),
+            "data_type": pn.widgets.Select.from_param(
+                self.param.data_type, width=150, height=80),
+            "available_bands": pn.widgets.Select.from_param(
+                self.param.available_bands, width=150, height=80),
+            "source_coordinates": pn.widgets.Checkbox.from_param(
+                self.param.source_coordinates),
+            "external_coordinates": pn.widgets.Checkbox.from_param(
+                self.param.external_coordinates),
+        }
+
+        self.image_settings = pn.Column(
+            self.param_widgets["clipping"],
+            self.param_widgets["radius"],
+            pn.Row(self.param_widgets["stretching"], self.param_widgets["scaling"]),
+            pn.Row(self.param_widgets["data_type"], self.param_widgets["available_bands"]),
+            pn.Row(self.param_widgets["source_coordinates"],
+                   self.param_widgets["external_coordinates"]),
+        )
+    
+        def _get_images_function(self, ra, dec, radius):
+            if self.alma_object is None:
+                self.alma_object = AlmaCutoutClass(client = shared_data.get_data("Alma_client"))
+            header, data, wcs = self.alma_object.get_cutouts(ra = ra, dec = dec)
+            alma_plot_object = ALMAPlotClass(header, data, wcs = wcs, radius = radius)
+            image, wcs = alma_plot_object.image, alma_plot_object.wcs
+            return image, wcs
+
+
+    

@@ -5,7 +5,7 @@ from astronomicAL.dashboard.menu import MenuDashboard
 from astronomicAL.dashboard.plot import HistoDashboard, ScatterPlotDashboard, DensityPlotDashboard
 from astronomicAL.dashboard.selected_source import SelectedSourceDashboard
 from astronomicAL.dashboard.settings_dashboard import SettingsDashboard
-from astronomicAL.extensions import extension_plots, custom_plots
+from astronomicAL.extensions import extension_plots, custom_plots, astro_panels
 from bokeh.models import ColumnDataSource
 
 import astronomicAL.config as config
@@ -58,7 +58,7 @@ class Dashboard(param.Parameterized):
         self._submit_button.on_click(self._submit_button_cb)
         
         self.plot_dict = extension_plots.get_plot_dict()
-        self.cust_plot_dict = custom_plots.get_customplot_dict()
+        self.cust_plot_dict = {**custom_plots.get_customplot_dict(), **astro_panels.get_customplot_dict_new()}
         self.contents = contents
         
  

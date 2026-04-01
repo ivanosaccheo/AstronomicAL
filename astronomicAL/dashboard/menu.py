@@ -1,5 +1,6 @@
 from astronomicAL.extensions import extension_plots
 from astronomicAL.extensions import custom_plots
+from astronomicAL.extensions import astro_panels
 from bokeh.models.widgets import Dropdown
 from functools import partial
 
@@ -32,7 +33,10 @@ class MenuDashboard:
             "Histogram Plot",
             "Density Plot",
             "Selected Source Info",
-        ] + list(custom_plots.get_customplot_dict().keys()) +  list(extension_plots.get_plot_dict().keys())
+        ] + (list(custom_plots.get_customplot_dict().keys()) +  
+          list(astro_panels.get_customplot_dict_new().keys()) +
+          list(extension_plots.get_plot_dict().keys()))
+        
 
         dd = Dropdown(label="Choose Plot Type:", menu=plot_options)
 
